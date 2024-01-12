@@ -1,9 +1,10 @@
 import os
 import sys
-
 import mediapy as media
 import numpy as np
 from PIL import Image
+from sklearn.cluster import KMeans
+
 
 NUM_OF_GRAY_LEVELS = 256
 ALL_GREYSCALE_HISTOGRAM_BINS = np.arange(NUM_OF_GRAY_LEVELS + 1)
@@ -64,12 +65,6 @@ def process_video_type_2(video_path):
     cumsum_histogram_distance = sum_diff_consecutive_rows(video_cumsum_histogram)
     frame_with_max_distance = np.argmax(cumsum_histogram_distance)
     return frame_with_max_distance, (frame_with_max_distance + 1)
-
-# video4_histogram = cumsum_along_y(video_histogram)
-# cumsum_histogram_distance = sum_diff_consecutive_rows(video4_histogram)
-# plt.plot(cumsum_histogram_distance)
-# print(np.argmax(cumsum_histogram_distance))
-
 
 
 def get_video_by_file_path(path: str):
@@ -152,9 +147,38 @@ def sum_diff_consecutive_rows(matrix):
     return sum_abs_diff
 
 
-def get_video_histogram_edges(video, num_of_bins=9, range=(0,255)) -> np.ndarray:
-    _, edges = np.histogram(video, bins=num_of_bins, range=range)
-    return edges.astype(np.uint8)
+def randomly_choose_percent(video, percent=0.05):
+    percent = np.max([percent, 0.05])
+    num_frames = video.shape[0]
+    num_frames_to_choose = int(percent * num_frames)
+
+    # Randomly choose 10% of the frames
+    chosen_frames_indices = np.random.choice(num_frames, size=num_frames_to_choose, replace=False)
+
+    # Create a new 3D matrix with only the chosen frames
+    chosen_frames_data = video[chosen_frames_indices, :, :]
+
+    return chosen_frames_data
+
+
+def optimal_quantization(data, num_bins):
+    # Reshape the 3D to a 1D array
+    flattened_data = data.reshape(-1)
+    matrix_2d = np.column_stack((flattened_data, np.zeros(len(flattened_data))))
+
+    # Fit k-means clustering
+    kmeans = KMeans(n_clusters=num_bins, random_state=42, n_init=10)
+    kmeans.fit(matrix_2d) # np.zeros(len(flattened_data))
+
+    # Get the cluster centers as the optimal quantization levels
+    quantization_levels = kmeans.cluster_centers_
+
+    return quantization_levels
+
+
+def get_video_histogram_edges(video, num_of_bins=9) -> np.ndarray:
+    video_sample = randomly_choose_percent(video)
+    return optimal_quantization(video_sample, num_of_bins)
 
 
 def map_to_closest_values(matrix, values):
