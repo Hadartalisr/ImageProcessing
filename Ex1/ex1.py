@@ -4,6 +4,7 @@ import mediapy as media
 import numpy as np
 from PIL import Image
 from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
 
 
 NUM_OF_GRAY_LEVELS = 256
@@ -49,10 +50,9 @@ def internal_main():
 
 def process_video_type_1(video_path):
     video = get_greyscale_video_by_file_path(video_path)
-    video_histogram = get_video_histogram(video)
-    video_cumsum_histogram = cumsum_along_y(video_histogram)
-    cumsum_histogram_distance = sum_diff_consecutive_rows(video_cumsum_histogram)
-    frame_with_max_distance = np.argmax(cumsum_histogram_distance)
+    histogram = get_video_histogram(video)
+    histogram_distance = sum_diff_consecutive_rows(histogram)
+    frame_with_max_distance = np.argmax(histogram_distance)
     return frame_with_max_distance, (frame_with_max_distance + 1)
 
 
@@ -60,11 +60,16 @@ def process_video_type_2(video_path):
     video = get_greyscale_video_by_file_path(video_path)
     values_arr = get_video_histogram_edges(video)
     quantized_video = quantize_video(video, values_arr)
-    video_histogram = get_video_histogram(quantized_video)
-    video_cumsum_histogram = cumsum_along_y(video_histogram)
-    cumsum_histogram_distance = sum_diff_consecutive_rows(video_cumsum_histogram)
+    cumsum_histogram_distance = get_video_cumsum_histogram_distance(quantized_video)
     frame_with_max_distance = np.argmax(cumsum_histogram_distance)
     return frame_with_max_distance, (frame_with_max_distance + 1)
+
+
+def get_video_cumsum_histogram_distance(video):
+    video_histogram = get_video_histogram(video)
+    video_cumsum_histogram = cumsum_along_y(video_histogram)
+    cumsum_histogram_distance = sum_diff_consecutive_rows(video_cumsum_histogram)
+    return cumsum_histogram_distance
 
 
 def get_video_by_file_path(path: str):
@@ -211,6 +216,36 @@ def quantize_video(video, values_arr):
         image = map_to_closest_values(video[i], values_arr)
         quantized_video[i] = image
     return quantized_video
+
+
+def plot_1d_histogram(bins, values):
+    plt.bar(bins, values, color='green')
+    plt.title('Histogram')
+    plt.xlabel('Value')
+    plt.ylabel('Occurrences')
+    plt.grid(True)
+    plt.show()
+
+
+def plot_2d_histogram(mat: np.ndarray, title='Histogram', xlabel='Frame', ylabel='Grayscale'):
+    hist_to_show = np.rot90(mat)
+    plt.imshow(hist_to_show, cmap='viridis')
+    plt.colorbar()
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.gca().invert_yaxis()
+    plt.show()
+
+
+def get_top5_max_values(arr):
+    # Get the indices of the top 5 maximum values
+    indices = np.argsort(arr)[-5:][::-1]
+
+    # Get the top 5 maximum values
+    top5_values = arr[indices]
+
+    return top5_values, indices
 
 
 if __name__ == "__main__":
