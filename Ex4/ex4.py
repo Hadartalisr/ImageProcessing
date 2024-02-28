@@ -1,10 +1,10 @@
-import math
 import numpy as np
+import cv2 as cv2
 from scipy.signal import convolve2d
-from math import comb
+from scipy.special import comb
+import math
+import concurrent.futures
 from copy import deepcopy
-import cv2
-from scipy.ndimage import maximum_filter
 import pywt
 
 
@@ -18,7 +18,7 @@ def get_gray_img_mat(img):
     return img
 
 
-def expand_image(img, expanded_size, kernel_size=5, ratio=2):
+def expand_image(img, expanded_size, kernel_size, ratio=2):
     # Create the expanded image with zeros
     expanded_img = np.zeros(expanded_size)
     # Create the gaussian kernel
@@ -72,7 +72,7 @@ def reduce_image(img, reduced_img_size, kernel_size=5, should_blur=True):
 
 
 def get_reduced_size(img, factor=2):
-    return (img.shape[0] // factor, img.shape[1] // factor)
+    return img.shape[0] // factor, img.shape[1] // factor
 
 
 def get_max_level(img):
@@ -80,10 +80,11 @@ def get_max_level(img):
 
 
 # @measure_time
-def create_pyramid(img, kernel_size=5):
+def create_pyramid(img, kernel_size, scale=10):
     pyramid = []
     pyramid.append({'G': img})
     reduced_img = img
+    level = min(get_max_level(img), scale + 1)
     for i in range(1, get_max_level(img)):
         reduced_img_size = get_reduced_size(reduced_img, 2)
         reduced_img = reduce_image(reduced_img, reduced_img_size, kernel_size)
@@ -108,6 +109,152 @@ def get_mask_pyramid(mask):
         mask_pyramid.append({'G': reduced_mask})
     return mask_pyramid
 
+
+def get_images_for_feature_matching(img_high_res_gray, img_low_res_gray, scale):
+    high_res_pyramid = create_pyramid(img_high_res_gray, gaussian_kernel_size, scale)
+    low_res_pyramid = create_pyramid(img_low_res_gray, gaussian_kernel_size, scale)
+
+    high_res_img = cv2.normalize(high_res_pyramid[scale]['G'], None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
+    low_res_img = cv2.normalize(low_res_pyramid[scale]['G'], None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
+    return high_res_img, low_res_img
+
+
+def get_original_coordinates(points, scale):
+    return points * (2 ** scale)
+
+
+def get_colored_img_high_res_wrapped(colored_img_high_res, H):
+    h, w = colored_img_high_res.shape[:2]
+    colored_img_warped = np.zeros((h, w, 3), dtype=np.uint8)
+    for i in range(3):
+        colored_img_warped[:, :, i] = cv2.warpPerspective(colored_img_high_res[:, :, i], H, (w, h))
+    return colored_img_warped
+
+
+def blend_pyramids(pyramid1, pyramid2, mask_pyramid, max_level=100):
+    blended_pyramid = []
+    i = 0
+    max_level = min(max_level, len(pyramid1))
+    for i in range(max_level - 1):
+        blended_pyramid.append(
+            {'L': pyramid1[i]['L'] * mask_pyramid[i]['G'] + (1 - mask_pyramid[i]['G']) * pyramid2[i]['L']})
+    # the last level is blended differently
+    blended_pyramid.append(
+        {'L': pyramid1[i + 1]['G'] * mask_pyramid[i + 1]['G'] + (1 - mask_pyramid[i + 1]['G']) * pyramid2[i + 1]['G']})
+    return blended_pyramid
+
+
+def reconstruct_image(pyramid, kernel_size):
+    reconstructed_img = pyramid[-1]['L']
+    for i in range(len(pyramid) - 2, -1, -1):
+        expanded_img = expand_image(reconstructed_img, pyramid[i]['L'].shape, kernel_size)
+        reconstructed_img = expanded_img + pyramid[i]['L']
+    return reconstructed_img
+
+
+def blend_images(img1, img2, mask, max_level, kernel_size):
+    with (concurrent.futures.ThreadPoolExecutor()):
+        img1_pyramid_a, img1_pyramid_b, img1_pyramid_c = create_pyramid(img1[:, :, 0], kernel_size), create_pyramid(
+            img1[:, :, 1], kernel_size), create_pyramid(img1[:, :, 2], kernel_size)
+        img2_pyramid_a, img2_pyramid_b, img2_pyramid_c = create_pyramid(img2[:, :, 0], kernel_size), create_pyramid(
+            img2[:, :, 1], kernel_size), create_pyramid(img2[:, :, 2], kernel_size)
+        mask_pyramid = get_mask_pyramid(mask)
+        blended_pyramid_a = blend_pyramids(img1_pyramid_a, img2_pyramid_a, mask_pyramid, max_level)
+        blended_pyramid_b = blend_pyramids(img1_pyramid_b, img2_pyramid_b, mask_pyramid, max_level)
+        blended_pyramid_c = blend_pyramids(img1_pyramid_c, img2_pyramid_c, mask_pyramid, max_level)
+    reconstructed_img_a = reconstruct_image(blended_pyramid_a, kernel_size)
+    reconstructed_img_b = reconstruct_image(blended_pyramid_b, kernel_size)
+    reconstructed_img_c = reconstruct_image(blended_pyramid_c, kernel_size)
+
+    # normalize the image
+    reconstructed_img_a = cv2.normalize(reconstructed_img_a, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
+    reconstructed_img_b = cv2.normalize(reconstructed_img_b, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
+    reconstructed_img_c = cv2.normalize(reconstructed_img_c, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
+    return np.dstack((reconstructed_img_a, reconstructed_img_b, reconstructed_img_c))
+
+
+# hyper parameters
+scale_for_feature_matching = 2
+gaussian_kernel_size = 5
+ratio_1nn_to_2nn = 0.8
+max_error_for_homography = 5
+
+
+def ex4(img_high_res_path, img_low_res_path):
+    # open the images
+    colored_img_high_res = open_image(img_high_res_path)
+    colored_img_low_res = open_image(img_low_res_path)
+    # convert the images to gray scale
+    img_high_res_gray = get_gray_img_mat(colored_img_high_res)
+    img_low_res_gray = get_gray_img_mat(colored_img_low_res)
+    # create the pyramids (gaussian and laplacian) for the images
+
+    # get the images for feature matching
+    img_high_res_gray, img_low_res_gray = get_images_for_feature_matching(img_high_res_gray, img_low_res_gray,
+                                                                          scale_for_feature_matching)
+
+    # Initiate SIFT detector
+    sift = cv2.SIFT_create()
+
+    # find the keypoints and descriptors with SIFT
+    kp_high = sift.detect(img_high_res_gray, None)
+    kp_low = sift.detect(img_low_res_gray, None)
+
+    # compute the descriptors
+    kp_high, des_high = sift.compute(img_high_res_gray, kp_high)
+    kp_low, des_low = sift.compute(img_low_res_gray, kp_low)
+
+    # BFMatcher with default params
+    bf = cv2.BFMatcher()
+    matches = bf.knnMatch(des_high, des_low, k=2)
+
+    # Apply ratio test
+    good = []
+    for m, n in matches:
+        if m.distance < ratio_1nn_to_2nn * n.distance:
+            good.append(m)
+
+    # Extract keypoints from good matches
+    kp_high_matched = [kp_high[m.queryIdx] for m in good]
+    kp_low_matched = [kp_low[m.trainIdx] for m in good]
+
+    # covnert keypoints to numpy arrays
+    src_pts = np.float32([kp.pt for kp in kp_high_matched]).reshape(-1, 1, 2)
+    dst_pts = np.float32([kp.pt for kp in kp_low_matched]).reshape(-1, 1, 2)
+
+    src_pts = get_original_coordinates(src_pts, scale_for_feature_matching)
+    dst_pts = get_original_coordinates(dst_pts, scale_for_feature_matching)
+
+    H, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, max_error_for_homography)
+    colored_high_img_wraped = get_colored_img_high_res_wrapped(colored_img_high_res, H)
+    mask = (colored_high_img_wraped != 0).astype(np.uint8)[:, :, 0]
+
+    blended_image = blend_images(colored_high_img_wraped, colored_img_low_res, mask, 2, gaussian_kernel_size)
+    return blended_image
+
+
+# usage example
+
+# img_low_res_path = './assets/lake_low_res.jpg'
+# img_high_res_path = './assets/lake_high_res.png'
+
+# img_high_res_path = './assets/desert_high_res.png'
+# img_low_res_path = './assets/desert_low_res.jpg'
+#
+# blended_image = ex4(img_high_res_path, img_low_res_path)
+# plt.imshow(cv2.cvtColor(blended_image, cv2.COLOR_BGR2RGB))
+
+
+# manually implementation of the core functionality
+
+# threshold = 0.3
+# harris_window_size = 5
+# k = 0.04
+# suppression_window_size = 5
+# scales = 3
+# descriptor_window_size = 8
+# scale_added_to_get_descriptor = 2
+# matches_ratio_threshold = 0.8
 
 # implementing Harris corner detection
 def harris_corner_detection(gray_img, harris_window_size, k):
@@ -222,11 +369,6 @@ def calculate_homography(matches):
     U, S, V = np.linalg.svd(A)
     H = V[-1].reshape(3, 3)
     return H
-
-
-# create a function that based on the scale of a descriptor, returns the original coordinates of the descriptor
-def get_original_coordinates(descriptor):
-    return descriptor[0] * (2 ** descriptor[2]), descriptor[1] * (2 ** descriptor[2])
 
 
 # create a function that returns the euclidean distance between two descriptors
@@ -372,8 +514,6 @@ def remove_corners_from_high_res_image_edges(img, corners):
     return new_corners
 
 
-# create a function that get R_arr, threshold, and max_corners and iterates over the R_arr and for each R set the value to 0 if it is lower than the threshold
-# additionally, the total number of values that are not 0 should be less than max_corners
 def get_corners_arr(R_arr, threshold, max_corners):
     corners_arr = []
     for R in R_arr:
@@ -402,12 +542,12 @@ def get_all_matches(descriptors1, descriptors2):
     descriptors1_wavelets = np.array([wavelet_transform(d[4]) for d in descriptors1])
     descriptors2_wavelets = np.array([wavelet_transform(d[4]) for d in descriptors2])
     for i, wavelet in enumerate(descriptors1_wavelets):
-        best_match_idx, second_best_match_idx, NN_1, NN_2  = get_best_match(wavelet, descriptors2_wavelets)
+        best_match_idx, second_best_match_idx, NN_1, NN_2 = get_best_match(wavelet, descriptors2_wavelets)
         best_match = descriptors2[best_match_idx]
         # second_best_match = descriptors2[second_best_match_idx]
         # if best_match is not None and second_best_match is not None:
-            # if not NN_1 or not NN_2 or NN_2 == 0:
-            #     continue
+        # if not NN_1 or not NN_2 or NN_2 == 0:
+        #     continue
         matches.append([descriptors1[i], best_match, NN_1 / NN_2])
         if i % 500 == 0:
             print(f'iteration {i}')
@@ -422,53 +562,28 @@ def get_best_matches(matches, threshold):
             best_matches.append(match)
     return best_matches
 
+# example usage of the munually implemented functions for image blending
 
-threshold = 0.3
-harris_window_size = 5
-k = 0.04
-suppression_window_size = 5
-scales = 3
-
-img_low_res_path = './assets/desert_low_res.jpg'
-img_high_res_path = './assets/desert_high_res.png'
-
-img_low_res = open_image(img_low_res_path)
-img_high_res = open_image(img_high_res_path)
-img_low_res_gray = get_gray_img_mat(img_low_res)
-img_high_res_gray = get_gray_img_mat(img_high_res)
-low_pyramid = create_pyramid(img_low_res_gray, harris_window_size)
-high_pyramid = create_pyramid(img_high_res_gray, harris_window_size)
-R_arr_low = multiscale_harris_corner_detector(low_pyramid, scales, harris_window_size, k, suppression_window_size)
-R_arr_high = multiscale_harris_corner_detector(high_pyramid, scales, harris_window_size, k, suppression_window_size)
-
-
-R_arr_low[0] = np.zeros(R_arr_low[0].shape)
-
-descriptor_window_size = 8
-scale_added_to_get_descriptor = 2
-
-
-max_corners_per_scale = 10000
-corners_arr_low = get_corners_arr(R_arr_low, threshold, max_corners_per_scale)
-corners_arr_high = get_corners_arr(R_arr_high, threshold, max_corners_per_scale)
-
-descriptors_low = get_mops_descriptors(low_pyramid, corners_arr_low, descriptor_window_size, scale_added_to_get_descriptor)
-descriptors_high = get_mops_descriptors(high_pyramid, corners_arr_high, descriptor_window_size, scale_added_to_get_descriptor)
-
-all_matches = get_all_matches(descriptors_high, descriptors_low)
-
-matches_ratio_threshold = 0.8
-matches = get_best_matches(all_matches, matches_ratio_threshold)
-
-matches_with_original_coordinates = get_matches_with_original_coordinates(matches)
-H, inliers = ransac(matches_with_original_coordinates, 1000, 10)
-
-transformed_img = transform_image(img_high_res, H)
-
-# transformed_img = transform_image(img_high_res, best_H)
-# create a mask that is 1 in the area of the transformed image and 0 in the area of the original image
-mask = np.any(transformed_img != 0, axis=-1).astype(int)
-
-blended_img = deepcopy(img_low_res)
-blended_img[mask == 1] = transformed_img[mask == 1]
+# img_low_res_path = './assets/desert_low_res.jpg'
+# img_high_res_path = './assets/desert_high_res.png'
+# img_low_res = open_image(img_low_res_path)
+# img_high_res = open_image(img_high_res_path)
+# img_low_res_gray = get_gray_img_mat(img_low_res)
+# img_high_res_gray = get_gray_img_mat(img_high_res)
+# low_pyramid = create_pyramid(img_low_res_gray, harris_window_size)
+# high_pyramid = create_pyramid(img_high_res_gray, harris_window_size)
+# R_arr_low = multiscale_harris_corner_detector(low_pyramid, scales, harris_window_size, k, suppression_window_size)
+# R_arr_high = multiscale_harris_corner_detector(high_pyramid, scales, harris_window_size, k, suppression_window_size)
+# corners_arr_low = get_corners_arr(R_arr_low, threshold, max_corners_per_scale)
+# corners_arr_high = get_corners_arr(R_arr_high, threshold, max_corners_per_scale)
+# descriptors_low = get_mops_descriptors(low_pyramid, corners_arr_low, descriptor_window_size, scale_added_to_get_descriptor)
+# descriptors_high = get_mops_descriptors(high_pyramid, corners_arr_high, descriptor_window_size, scale_added_to_get_descriptor)
+# all_matches = get_all_matches(descriptors_high, descriptors_low)
+# matches = get_best_matches(all_matches, matches_ratio_threshold)
+# matches_with_original_coordinates = get_matches_with_original_coordinates(matches)
+# H, inliers = ransac(matches_with_original_coordinates, 1000, 10)
+# transformed_img = transform_image(img_high_res, H)
+# mask = np.any(transformed_img != 0, axis=-1).astype(int)
+# blended_img = deepcopy(img_low_res)
+# blended_img[mask == 1] = transformed_img[mask == 1]
 
