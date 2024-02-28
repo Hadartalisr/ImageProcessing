@@ -1,6 +1,6 @@
 # Fdb version 4
-["pdflatex"] 1709027041 "/Users/hadar/Dev/ImageProcessing/Ex4/submission/ex4.tex" "ex4.pdf" "ex4" 1709027041 0
-  "/Users/hadar/Dev/ImageProcessing/Ex4/submission/ex4.tex" 1709027041 1120 10f50576dccec1e54db690f2b3a617fa ""
+["pdflatex"] 1709027760 "/Users/hadar/Dev/ImageProcessing/Ex4/submission/ex4.tex" "ex4.pdf" "ex4" 1709027761 0
+  "/Users/hadar/Dev/ImageProcessing/Ex4/submission/ex4.tex" 1709027760 2458 5d8fff6e17c7f7a919ade45a183035ca ""
   "/usr/local/texlive/2023/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc" 1136849721 2971 def0b6c1f0b107b3b936def894055589 ""
   "/usr/local/texlive/2023/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2023/texmf-dist/fonts/tfm/jknappen/ec/ecbx1728.tfm" 1136768653 3584 ad49a18d8515beef6d92d4d3f197d0fd ""
@@ -92,9 +92,9 @@
   "/usr/local/texlive/2023/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1704132955 4623355 b8cad38412faebe1ce5b780a45db67bd ""
   "/usr/local/texlive/2023/texmf-var/web2c/pdftex/pdflatex.fmt" 1704132894 7883456 c13f8946c56594f5dcdd381302c8dbcf ""
   "/usr/local/texlive/2023/texmf.cnf" 1678822455 577 1b2b1af17af2508fb20dd85783af4050 ""
-  "ex4.aux" 1709027041 634 dae04709ba649dfc3b6dcbd4618c9067 "pdflatex"
-  "ex4.out" 1709027041 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
-  "ex4.tex" 1709027041 1120 10f50576dccec1e54db690f2b3a617fa ""
+  "ex4.aux" 1709027761 634 dae04709ba649dfc3b6dcbd4618c9067 "pdflatex"
+  "ex4.out" 1709027760 0 d41d8cd98f00b204e9800998ecf8427e "pdflatex"
+  "ex4.tex" 1709027760 2458 5d8fff6e17c7f7a919ade45a183035ca ""
   (generated)
   "ex4.aux"
   "ex4.log"

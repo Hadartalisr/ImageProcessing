@@ -36,7 +36,27 @@
 
 \section*{Introduction}
 
-I have implemented the following Python functions:
+The objective of the exercise is to develop a comprehensive image registration and blending algorithm 
+capable of aligning and seamlessly blending two images of varying resolutions. 
+This task is tackled through a combination of advanced techniques. 
+Firstly, a multiscale image pyramid is constructed to represent the images at different resolutions, 
+enabling feature detection and matching across multiple scales. 
+Harris corner detection is employed to identify key features in the images, 
+and MOPS descriptors are generated to robustly describe these features. 
+Subsequently, feature matching is performed to establish correspondences between the images, 
+facilitating the estimation of geometric transformations. 
+To handle outliers and ensure robustness in the presence of noise, RANSAC (Random Sample Consensus) 
+is employed for accurate transformation parameter estimation. 
+The estimated transformation is then applied to one of the images to align it with the other image effectively. 
+Finally, image blending is executed using a mask to seamlessly integrate the transformed image with the reference image, 
+ensuring a visually appealing composite result without artifacts at the boundaries. 
+Overall, this exercise integrates concepts from image processing, computer vision, 
+and geometric transformations to achieve the goal of accurate image registration and blending.
+
+
+
+
+
 
 \section*{Algorithm}
 
